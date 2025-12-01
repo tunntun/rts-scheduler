@@ -1,0 +1,18 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+}
+
+#controls label {
+    margin-right: 10px;
+}
+
+#controls select, #controls input, #controls button {
+    margin-right: 20px;
+    margin-bottom: 10px;
+}
+
+#ganttCanvas {
+    border: 1px solid #444;
+    margin-top: 20px;
+}

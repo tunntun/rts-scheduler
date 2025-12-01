@@ -1,0 +1,46 @@
+doctype html
+html(lang="en")
+  head
+    meta(charset="UTF-8")
+    title RTS Scheduler Simulator
+    link(rel="stylesheet" href="/styles/index.css")
+
+  body
+    h2 Real-Time Systems Scheduler Simulator
+
+    #controls
+      label Scheduler:
+      select#schedulerSelect
+        option(value="RM") Rate Monotonic (RM)
+        option(value="EDF") Earliest Deadline First (EDF)
+        option(value="LLF") Least Laxity First (LLF)
+
+      label Server Mode:
+      select#serverSelect
+        option(value="background") Background
+        option(value="poller") Poller Server
+        option(value="deferrable") Deferrable Server
+
+      label Consumption Rule:
+      select#consumptionSelect
+        option(value="C1") C1 (consume only while running)
+        option(value="C2") C2 (consume during entire busy interval)
+
+      label Replenishment Rule:
+      select#replSelect
+        option(value="R1") R1 (simple periodic)
+        option(value="R2") R2 (t_e + P_s rule)
+        option(value="R3") R3 (early replenish)
+
+      br
+      br
+
+      label Task File:
+      input#fileInput(type="file")
+
+      button#runBtn Run Simulation
+
+    h3 Schedule Timeline:
+    canvas#ganttCanvas(width="1200" height="300")
+
+    script(src="/script.js")

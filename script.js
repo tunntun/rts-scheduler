@@ -18,6 +18,7 @@ class Task {
         this.e = e;
         this.p = p;
         this.d = d;
+        this.released = false;
     }
 }
 
@@ -54,8 +55,11 @@ function gcd(a, b) {
 function lcm(a, b) {
     return (a * b) / gcd(a, b);
 }
-function computeHyperperiod(tasks) {
-    const periods = tasks.filter(t => t.type === "periodic").map(t => t.p);
+
+// Now takes ONLY periodic tasks
+function computeHyperperiod(periodicTasks) {
+    const periods = periodicTasks.map(t => t.p);
+    if (periods.length === 0) return 0;
     let L = periods[0];
     for (let i = 1; i < periods.length; i++) L = lcm(L, periods[i]);
     return L;
@@ -63,8 +67,8 @@ function computeHyperperiod(tasks) {
 
 function parseTaskFile(fileText) {
     const lines = fileText.split(/\r?\n/);
-    const tasks = [];
-    const aperiodicTasks = [];
+    const periodic = [];
+    const aperiodic = [];
 
     for (let rawLine of lines) {
         const line = rawLine.trim();
@@ -76,33 +80,47 @@ function parseTaskFile(fileText) {
         if (tag === "P") {
             if (parts.length === 5) {
                 const [, ri, ei, pi, di] = parts;
-                tasks.push(new Task("periodic", parseFloat(ri), parseFloat(ei), parseFloat(pi), parseFloat(di)));
+                periodic.push(new Task(
+                    "periodic",
+                    parseFloat(ri),
+                    parseFloat(ei),
+                    parseFloat(pi),
+                    parseFloat(di)
+                ));
             } else if (parts.length === 4) {
                 const [, ri, ei, pi] = parts;
-                tasks.push(new Task("periodic", parseFloat(ri), parseFloat(ei), parseFloat(pi), parseFloat(pi)));
+                periodic.push(new Task(
+                    "periodic",
+                    parseFloat(ri),
+                    parseFloat(ei),
+                    parseFloat(pi),
+                    parseFloat(pi)
+                ));
             } else if (parts.length === 3) {
                 const [, ei, pi] = parts;
-                tasks.push(new Task("periodic", 0, parseFloat(ei), parseFloat(pi), parseFloat(pi)));
+                periodic.push(new Task(
+                    "periodic",
+                    0,
+                    parseFloat(ei),
+                    parseFloat(pi),
+                    parseFloat(pi)
+                ));
             }
-        }
-
-        else if (tag === "A") {
+        } else if (tag === "A") {
             const [, ri, ei] = parts;
-            const ap = new Task("aperiodic", parseFloat(ri), parseFloat(ei), null, null);
-
-            tasks.push(ap);              // keep in general list (optional)
-            aperiodicTasks.push(ap);     // also keep in separate list
+            aperiodic.push(
+                new Task("aperiodic", parseFloat(ri), parseFloat(ei), null, null)
+            );
         }
     }
 
     return { periodic, aperiodic };
 }
 
-function releaseJobs(tasks, currentTime, jobCounter, readyQueue, arrivals) {
-    for (let i = 0; i < tasks.length; i++) {
-        const task = tasks[i];
-
-        if (task.type === "aperiodic") continue;
+// Release ONLY periodic jobs
+function releaseJobs(periodicTasks, currentTime, jobCounter, readyQueue, arrivals) {
+    for (let i = 0; i < periodicTasks.length; i++) {
+        const task = periodicTasks[i];
 
         if ((currentTime - task.r) >= 0 &&
             ((currentTime - task.r) % task.p === 0)) {
@@ -121,8 +139,7 @@ function releaseJobs(tasks, currentTime, jobCounter, readyQueue, arrivals) {
     }
 }
 
-
-
+// ----- SCHEDULING -----
 function pickRM(readyQueue) {
     return readyQueue.sort((a, b) => a.task.p - b.task.p)[0] || null;
 }
@@ -140,15 +157,18 @@ function pickJob(name, readyQueue, t) {
     return null;
 }
 
+// Aperiodic server selector (extensible)
 function selectAperiodicJob(serverMode, apJob, currentTime, periodicReady) {
     if (!apJob || apJob.remaining <= 0) return null;
 
     if (serverMode === "background") {
-        if (!periodicReady) return apJob;
+        // Background server: only runs when NO periodic job
+        return periodicReady ? null : apJob;
     }
 
     return null;
 }
+
 function runJobForOneTick(job, t, readyQueue) {
     if (!job) return;
 
@@ -161,31 +181,37 @@ function runJobForOneTick(job, t, readyQueue) {
 
     if (job.remaining <= 0) {
         job.finishTime = parseFloat((t + TIME_STEP).toFixed(3));
-        readyQueue.splice(readyQueue.indexOf(job), 1);
+        const idx = readyQueue.indexOf(job);
+        if (idx !== -1) {
+            readyQueue.splice(idx, 1);
+        }
     }
 }
 
+// ----- DRAWING -----
 function drawGanttChart(timeline, tasks, arrivals) {
     const canvas = document.getElementById("ganttCanvas");
     const ctx = canvas.getContext("2d");
 
-    const cellWidth = 40;  // width per 1 time unit (integer)
+    const cellWidth = 40;  // width per 1 time unit
     const stepWidth = TIME_STEP * cellWidth;
 
     const cellHeight = 26;
     const topMargin = 30;
     const leftMargin = 80;
 
-    const rows = tasks.length + 1;
+    const rows = tasks.length + 1; // tasks + IDLE row
     canvas.height = rows * (cellHeight + 10) + topMargin + 20;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (timeline.length === 0) return;
 
     // GRID
     ctx.strokeStyle = "#b0d8ff";
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
 
-    const totalTimeUnits = Math.ceil(timeline[timeline.length - 1].t);
+    const totalTimeUnits = Math.ceil(timeline[timeline.length - 1].t || 0);
 
     for (let t = 0; t <= totalTimeUnits; t++) {
         const x = leftMargin + t * cellWidth;
@@ -195,7 +221,6 @@ function drawGanttChart(timeline, tasks, arrivals) {
         ctx.stroke();
     }
 
-    // HORIZONTAL grid
     for (let r = 0; r <= rows; r++) {
         const y = topMargin + r * (cellHeight + 10) - 5;
         ctx.beginPath();
@@ -213,35 +238,44 @@ function drawGanttChart(timeline, tasks, arrivals) {
         ctx.fillText(t, x + 2, 20);
     }
 
-    // ARRIVAL ARROWS
+    // ARRIVAL ARROWS (only for periodic)
     arrivals.forEach(entry => {
-    const { time, taskIndex } = entry;
+        const { time, taskIndex } = entry;
 
-    const x = leftMargin + time * cellWidth;
+        const x = leftMargin + time * cellWidth;
+        const jobY = topMargin + taskIndex * (cellHeight + 10);
+        const arrowY = jobY + cellHeight + 4;
 
-    const row = taskIndex;
-    const jobY = topMargin + row * (cellHeight + 10);
+        ctx.fillStyle = "#ff0000";
 
-    const arrowY = jobY + cellHeight + 4;
+        ctx.beginPath();
+        ctx.moveTo(x + stepWidth / 2, arrowY);
+        ctx.lineTo(x + stepWidth / 2 - 5, arrowY + 10);
+        ctx.lineTo(x + stepWidth / 2 + 5, arrowY + 10);
+        ctx.closePath();
+        ctx.fill();
+    });
 
-    ctx.fillStyle = "#ff0000";
-
-    ctx.beginPath();
-    ctx.moveTo(x + stepWidth / 2, arrowY);          // top of arrow
-    ctx.lineTo(x + stepWidth / 2 - 5, arrowY + 10); // left bottom
-    ctx.lineTo(x + stepWidth / 2 + 5, arrowY + 10); // right bottom
-    ctx.closePath();
-    ctx.fill();
-});
+    // ROW mapping:
+    const periodicCount = tasks.filter(t => t.type === "periodic").length;
+    const aperiodicRow = periodicCount; // first aperiodic row (we assume one A job)
 
     // JOBS
     timeline.forEach(({ t, job }) => {
         const x = leftMargin + t * cellWidth;
 
-        let row = tasks.length; // idle by default
-        if (job !== "IDLE") {
+        let row = tasks.length; // idle row by default
+
+        if (job === "IDLE") {
+            row = tasks.length;
+        } else if (job === "A") {
+            // Aperiodic server row
+            row = aperiodicRow;
+        } else {
             const match = job.match(/T(\d+)/);
-            row = match ? parseInt(match[1]) : 0;
+            if (match) {
+                row = parseInt(match[1]);
+            }
         }
 
         const y = topMargin + row * (cellHeight + 10);
@@ -259,17 +293,37 @@ function drawGanttChart(timeline, tasks, arrivals) {
     ctx.font = "16px Arial";
     ctx.fillStyle = "#000";
 
-    tasks.forEach((_, i) => {
+    const periodicTasks = tasks.filter(t => t.type === "periodic");
+    const aperiodicTasks = tasks.filter(t => t.type === "aperiodic");
+
+    // Periodic labels
+    periodicTasks.forEach((_, i) => {
         ctx.fillText(`T${i}`, 20, topMargin + i * (cellHeight + 10) + 20);
     });
-    ctx.fillText("IDLE", 20, topMargin + tasks.length * (cellHeight + 10) + 20);
+
+    // Aperiodic label (if exists)
+    if (aperiodicTasks.length > 0) {
+        ctx.fillText(
+            "A",
+            20,
+            topMargin + aperiodicRow * (cellHeight + 10) + 20
+        );
+    }
+
+    // Idle label
+    ctx.fillText(
+        "IDLE",
+        20,
+        topMargin + tasks.length * (cellHeight + 10) + 20
+    );
 }
-
-
 
 function colorFromJobId(jobId) {
     if (jobId === "IDLE") return "#dddddd";
-    const idx = parseInt(jobId.match(/T(\d+)/)[1]);
+    if (jobId === "A") return "#ffe680"; // aperiodic: yellow-ish
+
+    const match = jobId.match(/T(\d+)/);
+    const idx = match ? parseInt(match[1]) : 0;
     const colors = ["#ff9999", "#99ff99", "#9999ff", "#ffcc99", "#cc99ff", "#99ffcc"];
     return colors[idx % colors.length];
 }
@@ -280,11 +334,16 @@ function showTaskInfo(tasks, hyperperiod) {
     let html = `<b>Hyperperiod:</b> ${hyperperiod}<br><br>`;
     html += `<b>Task Set:</b><br><ul>`;
 
-    tasks.forEach((t, i) => {
+    let periodicIndex = 0;
+    let aperiodicIndex = 0;
+
+    tasks.forEach((t) => {
         if (t.type === "periodic") {
-            html += `<li><b>T${i}</b> → release r=${t.r}, exec e=${t.e}, period p=${t.p}, deadline d=${t.d}</li>`;
+            html += `<li><b>T${periodicIndex}</b> → r=${t.r}, e=${t.e}, p=${t.p}, d=${t.d}</li>`;
+            periodicIndex++;
         } else {
-            html += `<li><b>Aperiodic</b> A${i} → release r=${t.r}, exec e=${t.e}</li>`;
+            html += `<li><b>A${aperiodicIndex}</b> → r=${t.r}, e=${t.e}</li>`;
+            aperiodicIndex++;
         }
     });
 
@@ -293,43 +352,112 @@ function showTaskInfo(tasks, hyperperiod) {
     div.innerHTML = html;
 }
 
-
-
-// MAIN SIMULATION LOOP
+// ----- MAIN SIMULATION LOOP -----
 document.getElementById("runBtn").addEventListener("click", () => {
     const scheduler = document.getElementById("schedulerSelect").value;
+    const serverMode = document.getElementById("serverSelect").value;
 
     const fileInput = document.getElementById("fileInput").files[0];
     if (!fileInput) return alert("Select a task file!");
 
     const reader = new FileReader();
     reader.onload = e => {
-        const tasks = parseTaskFile(e.target.result);
+        const { periodic, aperiodic } = parseTaskFile(e.target.result);
 
-        const SIMULATION_END = computeHyperperiod(tasks);
-        showTaskInfo(tasks, SIMULATION_END);
+        if (periodic.length === 0) {
+            alert("No periodic tasks found!");
+            return;
+        }
 
+        const SIMULATION_END = computeHyperperiod(periodic);
+        const allTasks = [...periodic, ...aperiodic];
+
+        showTaskInfo(allTasks, SIMULATION_END);
         console.log("Hyperperiod =", SIMULATION_END);
 
         let readyQueue = [];
-        let jobCounter = tasks.map(() => 1);
+        let jobCounter = periodic.map(() => 1);
         let timeline = [];
-
         let arrivals = [];
 
-        for (currentTime = 0; currentTime <= SIMULATION_END;
-            currentTime = parseFloat((currentTime + TIME_STEP).toFixed(3))) {
+        // Single aperiodic job (for now)
+        let apJob = null;
 
-            releaseJobs(tasks, currentTime, jobCounter, readyQueue, arrivals);
+        for (let currentTime = 0;
+             currentTime <= SIMULATION_END;
+             currentTime = parseFloat((currentTime + TIME_STEP).toFixed(3))) {
 
-            const jobToRun = pickJob(scheduler, readyQueue, currentTime);
+            // 1) Periodic releases
+            releaseJobs(periodic, currentTime, jobCounter, readyQueue, arrivals);
 
-            runJobForOneTick(jobToRun, currentTime, readyQueue);
+            // 2) Aperiodic release (first A that becomes ready)
+            if (!apJob) {
+                for (let t of aperiodic) {
+                    if (!t.released && currentTime >= t.r) {
+                        t.released = true;
+                        apJob = {
+                            type: "aperiodic",
+                            task: t,
+                            jobId: "A",
+                            remaining: t.e,
+                            started: false,
+                            startTime: null,
+                            finishTime: null
+                        };
+                        break;
+                    }
+                }
+            }
 
-            timeline.push({ t: currentTime, job: jobToRun ? jobToRun.jobId : "IDLE" });
+            // 3) Pick periodic job (RM / EDF / LLF)
+            let periodicJob = pickJob(scheduler, readyQueue, currentTime);
+
+            // 4) Decide if aperiodic server should run
+            let aperiodicToRun = selectAperiodicJob(
+                serverMode,
+                apJob,
+                currentTime,
+                periodicJob
+            );
+
+            // 5) Execute
+            let jobToRun = null;
+
+            if (periodicJob) {
+                jobToRun = periodicJob;
+                runJobForOneTick(periodicJob, currentTime, readyQueue);
+
+            } else if (aperiodicToRun) {
+                jobToRun = aperiodicToRun;
+
+                if (!aperiodicToRun.started) {
+                    aperiodicToRun.started = true;
+                    aperiodicToRun.startTime = currentTime;
+                }
+
+                aperiodicToRun.remaining = parseFloat(
+                    (aperiodicToRun.remaining - TIME_STEP).toFixed(3)
+                );
+
+                if (aperiodicToRun.remaining <= 0 && !aperiodicToRun.finishTime) {
+                    aperiodicToRun.finishTime = parseFloat(
+                        (currentTime + TIME_STEP).toFixed(3)
+                    );
+                }
+
+            } else {
+                // IDLE
+                jobToRun = { jobId: "IDLE" };
+            }
+
+            // 6) Log timeline
+            timeline.push({
+                t: currentTime,
+                job: jobToRun.jobId
+            });
         }
 
-        drawGanttChart(timeline, tasks, arrivals);
+        drawGanttChart(timeline, allTasks, arrivals);
     };
 
     reader.readAsText(fileInput);

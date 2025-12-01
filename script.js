@@ -64,6 +64,7 @@ function computeHyperperiod(tasks) {
 function parseTaskFile(fileText) {
     const lines = fileText.split(/\r?\n/);
     const tasks = [];
+    const aperiodicTasks = [];
 
     for (let rawLine of lines) {
         const line = rawLine.trim();
@@ -87,11 +88,14 @@ function parseTaskFile(fileText) {
 
         else if (tag === "A") {
             const [, ri, ei] = parts;
-            tasks.push(new Task("aperiodic", parseFloat(ri), parseFloat(ei), null, null));
+            const ap = new Task("aperiodic", parseFloat(ri), parseFloat(ei), null, null);
+
+            tasks.push(ap);              // keep in general list (optional)
+            aperiodicTasks.push(ap);     // also keep in separate list
         }
     }
 
-    return tasks;
+    return { periodic, aperiodic };
 }
 
 function releaseJobs(tasks, currentTime, jobCounter, readyQueue, arrivals) {
@@ -136,6 +140,15 @@ function pickJob(name, readyQueue, t) {
     return null;
 }
 
+function selectAperiodicJob(serverMode, apJob, currentTime, periodicReady) {
+    if (!apJob || apJob.remaining <= 0) return null;
+
+    if (serverMode === "background") {
+        if (!periodicReady) return apJob;
+    }
+
+    return null;
+}
 function runJobForOneTick(job, t, readyQueue) {
     if (!job) return;
 

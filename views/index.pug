@@ -21,16 +21,23 @@ html(lang="en")
         option(value="poller") Poller Server
         option(value="deferrable") Deferrable Server
 
-      label Consumption Rule:
-      select#consumptionSelect
-        option(value="C1") C1 (consume only while running)
-        option(value="C2") C2 (consume during entire busy interval)
+      .server-config
+        label(for="serverPeriod") Server Period:
+        input#serverPeriod(type="number" min="1" value="5" step="1")
 
-      label Replenishment Rule:
-      select#replSelect
-        option(value="R1") R1 (simple periodic)
-        option(value="R2") R2 (t_e + P_s rule)
-        option(value="R3") R3 (early replenish)
+        label(for="serverBudget") Server Budget:
+        input#serverBudget(type="number" min="0.1" value="1" step="0.1")
+
+      //- label Consumption Rule:
+      //- select#consumptionSelect
+      //-   option(value="C1") C1 (consume only while running)
+      //-   option(value="C2") C2 (consume during entire busy interval)
+
+      //- label Replenishment Rule:
+      //- select#replSelect
+      //-   option(value="R1") R1 (simple periodic)
+      //-   option(value="R2") R2 (t_e + P_s rule)
+      //-   option(value="R3") R3 (early replenish)
 
       br
       br
@@ -44,4 +51,4 @@ html(lang="en")
     #taskInfo(style="font-size:16px; margin-bottom:15px;")
     canvas#ganttCanvas(width="1200" height="300")
 
-    script(src="/script.js")
+  script(type="module" src="/script.js")

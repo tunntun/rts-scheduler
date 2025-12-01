@@ -1,3 +1,13 @@
+import * as background from "./servers/background.js";
+import * as poller from "./servers/poller.js";
+import * as deferrable from "./servers/deferrable.js";
+
+const serverModules = {
+    background,
+    poller,
+    deferrable
+};
+
 function autoRun() {
     document.getElementById("runBtn").click();
 }
@@ -5,8 +15,8 @@ function autoRun() {
 window.addEventListener("DOMContentLoaded", () => {
     document.getElementById("schedulerSelect").addEventListener("change", autoRun);
     document.getElementById("serverSelect").addEventListener("change", autoRun);
-    document.getElementById("consumptionSelect").addEventListener("change", autoRun);
-    document.getElementById("replSelect").addEventListener("change", autoRun);
+    // document.getElementById("consumptionSelect").addEventListener("change", autoRun);
+    // document.getElementById("replSelect").addEventListener("change", autoRun);
 });
 
 const TIME_STEP = 0.1;
@@ -310,28 +320,46 @@ document.getElementById("runBtn").addEventListener("click", () => {
     const serverMode = document.getElementById("serverSelect").value;
     const file = document.getElementById("fileInput").files[0];
 
+    const serverPeriod = parseFloat(document.getElementById("serverPeriod").value);
+    const serverBudget = parseFloat(document.getElementById("serverBudget").value);
+    console.log("SERVER MODE =", serverMode);
+    console.log("SERVER PERIOD =", serverPeriod);
+    console.log("SERVER BUDGET =", serverBudget);
+
     if (!file) return alert("Select a task file!");
 
     const reader = new FileReader();
     reader.onload = e => {
         const { periodic, aperiodic } = parseTaskFile(e.target.result);
+        let HP = computeHyperperiod(periodic);
 
-        const HP = computeHyperperiod(periodic);
+        if (serverMode === "poller" || serverMode === "deferrable") {
+            HP = lcm(HP, serverPeriod);
+        }
+
         showTaskInfo([...periodic, ...aperiodic], HP);
 
-        let readyQueue = [];
-        let arrivals = [];
-        let jobCounter = periodic.map(() => 1);
-        let timeline = [];
+        let server = {
+            period: serverPeriod,
+            budget: serverBudget,
+            remaining: 0,
+            nextRelease: serverPeriod
+        };
 
+        const serverModule = serverModules[serverMode];
+
+        let readyQueue = [];
         let apQueue = [];
+        let jobCounter = periodic.map(() => 1);
+        let arrivals = [];
+        let timeline = [];
 
         for (let t = 0; t <= HP; t = +(t + TIME_STEP).toFixed(3)) {
 
-            // periodic releases
+            // ---- 1. Periodic job releases ----
             releaseJobs(periodic, t, jobCounter, readyQueue, arrivals);
 
-            // aperiodic releases → FIFO
+            // ---- 2. Aperiodic job releases ----
             for (let A of aperiodic) {
                 if (!A.released && t >= A.r) {
                     A.released = true;
@@ -345,17 +373,16 @@ document.getElementById("runBtn").addEventListener("click", () => {
                 }
             }
 
-            // pick periodic job
+            // ---- 3. Pick periodic job (RM, EDF, LLF) ----
             let pJob = pickJob(scheduler, readyQueue, t);
 
-            // background server chooses A
+            // ---- 4. Server decides whether A-task may run ----
             let aJob = null;
-            if (canRunA(serverMode, pJob, apQueue)) {
-                aJob = apQueue[0];
+            if (serverModule.canRun(pJob, apQueue, server, t)) {
+                aJob = apQueue[0];   // FIFO Aperiodic queue
             }
-
-            // run
-            let jobToRun = null;
+            // ---- 5. Execute (periodic > aperiodic > idle) ----
+            let jobToRun;
 
             if (pJob) {
                 jobToRun = pJob;
@@ -364,13 +391,15 @@ document.getElementById("runBtn").addEventListener("click", () => {
             else if (aJob) {
                 jobToRun = aJob;
 
+                // First time running?
                 if (!aJob.started) {
                     aJob.started = true;
                     aJob.startTime = t;
                 }
-
+                // Execute the aperiodic job
                 aJob.remaining = +(aJob.remaining - TIME_STEP).toFixed(3);
 
+                // If finished, remove it
                 if (aJob.remaining <= 0) {
                     aJob.finishTime = +(t + TIME_STEP).toFixed(3);
                     apQueue.shift();
@@ -380,9 +409,14 @@ document.getElementById("runBtn").addEventListener("click", () => {
                 jobToRun = { jobId: "IDLE" };
             }
 
+            // ---- 6. Update server internal state ----
+            serverModule.update(aJob, server, t);
+
+            // ---- 7. Log timeline ----
             timeline.push({ t, job: jobToRun.jobId });
         }
 
+        // ---- 8. Draw chart ----
         drawGanttChart(timeline, [...periodic, ...aperiodic], arrivals);
     };
 

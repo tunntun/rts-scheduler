@@ -1,0 +1,4 @@
+P 0 1 4
+
+# Aperiodic arrives late
+A 3 3

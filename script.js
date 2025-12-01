@@ -1,31 +1,40 @@
+function autoRun() {
+    document.getElementById("runBtn").click();
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("schedulerSelect").addEventListener("change", autoRun);
+    document.getElementById("serverSelect").addEventListener("change", autoRun);
+    document.getElementById("consumptionSelect").addEventListener("change", autoRun);
+    document.getElementById("replSelect").addEventListener("change", autoRun);
+});
+
+const TIME_STEP = 0.1;
 
 class Task {
     constructor(type, r, e, p, d) {
-        this.type = type;   // "periodic" or "aperiodic"
-        this.r = r;         // release time
-        this.e = e;         // execution time
-        this.p = p;         // period (null for aperiodic)
-        this.d = d;         // deadline
+        this.type = type;
+        this.r = r;
+        this.e = e;
+        this.p = p;
+        this.d = d;
     }
 }
 
 class Job {
     constructor(task, releaseTime, jobId) {
-        this.task = task;               // reference to Task object
-        this.jobId = jobId;             // unique ID (e.g., "T1J3")
+        this.task = task;
+        this.jobId = jobId;
 
-        this.releaseTime = releaseTime; // actual release time
-        this.remaining = task.e;        // remaining execution time
+        this.releaseTime = releaseTime;
+        this.remaining = task.e;
 
-        // absolute deadline = releaseTime + relative deadline (task.d)
         this.deadline = releaseTime + task.d;
 
-        this.finished = false;          // true when remaining <= 0
-        this.started = false;           // first time it runs
-        this.startTime = null;          // when job starts executing
-        this.finishTime = null;         // when job finishes
+        this.started = false;
+        this.startTime = null;
+        this.finishTime = null;
 
-        // For LLF scheduling:
         this.laxity = Infinity;
     }
 
@@ -34,60 +43,23 @@ class Job {
     }
 }
 
-
-document.getElementById("runBtn").addEventListener("click", () => {
-    const scheduler = document.getElementById("schedulerSelect").value;
-    const serverMode = document.getElementById("serverSelect").value;
-    const consumptionRule = document.getElementById("consumptionSelect").value;
-    const replRule = document.getElementById("replSelect").value;
-
-    const fileInput = document.getElementById("fileInput").files[0];
-    if (!fileInput) {
-        alert("Please select a task file.");
-        return;
+function gcd(a, b) {
+    while (b !== 0) {
+        let t = b;
+        b = a % b;
+        a = t;
     }
-
-    const reader = new FileReader();
-    reader.onload = function (e) {
-        const fileText = e.target.result;
-        const tasks = parseTaskFile(fileText);
-
-        console.log("Parsed tasks:", tasks);
-        console.log("Scheduler:", scheduler);
-        console.log("Server:", serverMode);
-        console.log("Consumption rule:", consumptionRule);
-        console.log("Replenishment rule:", replRule);
-
-        // simulation engine'i buraya ekleyeceksin untuma
-        let currentTime = 0;
-        let SIMULATION_END = 20;
-
-        // Ready queue where RM/EDF/LLF pick jobs
-        let readyQueue = [];
-        let timeline = [];
-
-        // A job counter per task (for jobId naming)
-        let jobCounter = tasks.map(() => 1);
-
-        for (currentTime = 0; currentTime <= SIMULATION_END; currentTime++) {
-            // STEP 1 — Release periodic jobs
-            releaseJobs(tasks, currentTime, jobCounter, readyQueue);
-
-            // STEP 2 — Choose job to run
-            const jobToRun = pickJob(scheduler, readyQueue, currentTime);
-
-            console.log(`t=${currentTime} → running: ${jobToRun ? jobToRun.jobId : "IDLE"}`);
-
-            // STEP 3 — Execute job for 1 tick
-            runJobForOneTick(jobToRun, currentTime, readyQueue);
-            timeline[currentTime] = jobToRun ? jobToRun.jobId : "IDLE";
-        }
-        drawGanttChart(timeline, tasks);
-
-
-    };
-    reader.readAsText(fileInput);
-});
+    return a;
+}
+function lcm(a, b) {
+    return (a * b) / gcd(a, b);
+}
+function computeHyperperiod(tasks) {
+    const periods = tasks.filter(t => t.type === "periodic").map(t => t.p);
+    let L = periods[0];
+    for (let i = 1; i < periods.length; i++) L = lcm(L, periods[i]);
+    return L;
+}
 
 function parseTaskFile(fileText) {
     const lines = fileText.split(/\r?\n/);
@@ -95,241 +67,257 @@ function parseTaskFile(fileText) {
 
     for (let rawLine of lines) {
         const line = rawLine.trim();
-
-        // Skip empty lines or comments
         if (line === "" || line.startsWith("#")) continue;
 
         const parts = line.split(/\s+/);
         const tag = parts[0];
 
-        // Periodic tasks: P ...
         if (tag === "P") {
             if (parts.length === 5) {
-                // P ri ei pi di
                 const [, ri, ei, pi, di] = parts;
-                tasks.push(new Task(
-                    "periodic",
-                    parseFloat(ri),
-                    parseFloat(ei),
-                    parseFloat(pi),
-                    parseFloat(di)
-                ));
-            }
-            else if (parts.length === 4) {
-                // P ri ei pi   (deadline = period)
+                tasks.push(new Task("periodic", parseFloat(ri), parseFloat(ei), parseFloat(pi), parseFloat(di)));
+            } else if (parts.length === 4) {
                 const [, ri, ei, pi] = parts;
-                const period = parseFloat(pi);
-
-                tasks.push(new Task(
-                    "periodic",
-                    parseFloat(ri),
-                    parseFloat(ei),
-                    period,
-                    period   // default deadline = period
-                ));
-            }
-            else if (parts.length === 3) {
-                // P ei pi      (release = 0, deadline = period)
+                tasks.push(new Task("periodic", parseFloat(ri), parseFloat(ei), parseFloat(pi), parseFloat(pi)));
+            } else if (parts.length === 3) {
                 const [, ei, pi] = parts;
-                const period = parseFloat(pi);
-
-                tasks.push(new Task(
-                    "periodic",
-                    0, // default release time
-                    parseFloat(ei),
-                    period,
-                    period // default deadline = period
-                ));
-            }
-            else {
-                console.error("Invalid P line:", line);
+                tasks.push(new Task("periodic", 0, parseFloat(ei), parseFloat(pi), parseFloat(pi)));
             }
         }
 
-        // Deadline-monotonic variant: D ei pi di
-        else if (tag === "D") {
-            if (parts.length !== 4) {
-                console.error("Invalid D line:", line);
-                continue;
-            }
-
-            const [, ei, pi, di] = parts;
-
-            tasks.push(new Task(
-                "periodic",
-                0, // D format does not use explicit release time
-                parseFloat(ei),
-                parseFloat(pi),
-                parseFloat(di)
-            ));
-        }
-
-        // Aperiodic tasks: A ri ei
         else if (tag === "A") {
-            if (parts.length !== 3) {
-                console.error("Invalid A line:", line);
-                continue;
-            }
-
             const [, ri, ei] = parts;
-
-            tasks.push(new Task(
-                "aperiodic",
-                parseFloat(ri),
-                parseFloat(ei),
-                null, // no period
-                null // no deadline
-            ));
-        }
-
-        else {
-            console.error("Unknown task type:", tag);
+            tasks.push(new Task("aperiodic", parseFloat(ri), parseFloat(ei), null, null));
         }
     }
 
     return tasks;
 }
 
-function releaseJobs(tasks, currentTime, jobCounter, readyQueue) {
+function releaseJobs(tasks, currentTime, jobCounter, readyQueue, arrivals) {
     for (let i = 0; i < tasks.length; i++) {
         const task = tasks[i];
 
         if (task.type === "aperiodic") continue;
 
-        if ((currentTime - task.r) >= 0 && ((currentTime - task.r) % task.p === 0)) {
+        if ((currentTime - task.r) >= 0 &&
+            ((currentTime - task.r) % task.p === 0)) {
+
             const jobId = `T${i}J${jobCounter[i]}`;
             const job = new Job(task, currentTime, jobId);
+
             readyQueue.push(job);
             jobCounter[i]++;
+
+            arrivals.push({
+                time: currentTime,
+                taskIndex: i,
+            });
         }
     }
 }
 
+
+
 function pickRM(readyQueue) {
-    if (readyQueue.length === 0) return null;
-    readyQueue.sort((a, b) => a.task.p - b.task.p);
-    return readyQueue[0];
+    return readyQueue.sort((a, b) => a.task.p - b.task.p)[0] || null;
 }
-
 function pickEDF(readyQueue) {
-    if (readyQueue.length === 0) return null;
-    readyQueue.sort((a, b) => a.deadline - b.deadline);
-    return readyQueue[0];
+    return readyQueue.sort((a, b) => a.deadline - b.deadline)[0] || null;
 }
-
-function pickLLF(readyQueue, currentTime) {
-    if (readyQueue.length === 0) return null;
-    readyQueue.forEach(job => job.updateLaxity(currentTime));
-    readyQueue.sort((a, b) => a.laxity - b.laxity);
-    return readyQueue[0];
+function pickLLF(readyQueue, t) {
+    readyQueue.forEach(job => job.updateLaxity(t));
+    return readyQueue.sort((a, b) => a.laxity - b.laxity)[0] || null;
 }
-
-function pickJob(schedulerName, readyQueue, currentTime) {
-    if (schedulerName === "RM") return pickRM(readyQueue);
-    if (schedulerName === "EDF") return pickEDF(readyQueue);
-    if (schedulerName === "LLF") return pickLLF(readyQueue, currentTime);
+function pickJob(name, readyQueue, t) {
+    if (name === "RM") return pickRM(readyQueue);
+    if (name === "EDF") return pickEDF(readyQueue);
+    if (name === "LLF") return pickLLF(readyQueue, t);
     return null;
 }
 
-function runJobForOneTick(job, currentTime, readyQueue) {
+function runJobForOneTick(job, t, readyQueue) {
     if (!job) return;
 
     if (!job.started) {
         job.started = true;
-        job.startTime = currentTime;
+        job.startTime = t;
     }
 
-    job.remaining -= 1;
+    job.remaining = parseFloat((job.remaining - TIME_STEP).toFixed(3));
 
     if (job.remaining <= 0) {
-        job.finished = true;
-        job.finishTime = currentTime + 1;
-
-        const idx = readyQueue.indexOf(job);
-        if (idx !== -1) readyQueue.splice(idx, 1);
+        job.finishTime = parseFloat((t + TIME_STEP).toFixed(3));
+        readyQueue.splice(readyQueue.indexOf(job), 1);
     }
 }
-function drawGanttChart(timeline, tasks) {
+
+function drawGanttChart(timeline, tasks, arrivals) {
     const canvas = document.getElementById("ganttCanvas");
     const ctx = canvas.getContext("2d");
 
+    const cellWidth = 40;  // width per 1 time unit (integer)
+    const stepWidth = TIME_STEP * cellWidth;
+
+    const cellHeight = 26;
+    const topMargin = 30;
+    const leftMargin = 80;
+
+    const rows = tasks.length + 1;
+    canvas.height = rows * (cellHeight + 10) + topMargin + 20;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const cellWidth = 40;
-    const cellHeight = 25;
-    const topMargin = 20;
-    const leftMargin = 60;
-    ctx.strokeStyle = "#888";
+    // GRID
+    ctx.strokeStyle = "#b0d8ff";
     ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
+    ctx.setLineDash([]);
 
-    for (let t = 0; t < timeline.length; t++) {
+    const totalTimeUnits = Math.ceil(timeline[timeline.length - 1].t);
+
+    for (let t = 0; t <= totalTimeUnits; t++) {
         const x = leftMargin + t * cellWidth;
-
         ctx.beginPath();
-        ctx.moveTo(x, topMargin);
-        ctx.lineTo(x, canvas.height - topMargin);
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
         ctx.stroke();
     }
 
-    ctx.setLineDash([]); // reset dash
-
-    //Determine how many rows we need:
-    //one row per periodic task + one row for IDLE
-    const rows = tasks.length + 1; // last row = IDLE
-
-    canvas.height = rows * (cellHeight + 10) + topMargin * 2;
-
-    // Draw time axis labels
-    ctx.font = "12px Arial";
-    ctx.fillStyle = "#000";
-
-    for (let t = 0; t < timeline.length; t++) {
-        ctx.fillText(t, leftMargin + t * cellWidth + 10, 15);
+    // HORIZONTAL grid
+    for (let r = 0; r <= rows; r++) {
+        const y = topMargin + r * (cellHeight + 10) - 5;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
     }
 
-    // Draw each row
-    for (let t = 0; t < timeline.length; t++) {
-        const jobId = timeline[t];
+    // Time labels
+    ctx.font = "14px Arial";
+    ctx.fillStyle = "#000";
 
-        let row = 0;
-        if (jobId === "IDLE") {
-            row = tasks.length; // last row
-        } else {
-            // Extract task index from jobId like T2J4 =< 2
-            const match = jobId.match(/T(\d+)/);
+    for (let t = 0; t <= totalTimeUnits; t++) {
+        const x = leftMargin + t * cellWidth;
+        ctx.fillText(t, x + 2, 20);
+    }
+
+    // ARRIVAL ARROWS
+    arrivals.forEach(entry => {
+    const { time, taskIndex } = entry;
+
+    const x = leftMargin + time * cellWidth;
+
+    const row = taskIndex;
+    const jobY = topMargin + row * (cellHeight + 10);
+
+    const arrowY = jobY + cellHeight + 4;
+
+    ctx.fillStyle = "#ff0000";
+
+    ctx.beginPath();
+    ctx.moveTo(x + stepWidth / 2, arrowY);          // top of arrow
+    ctx.lineTo(x + stepWidth / 2 - 5, arrowY + 10); // left bottom
+    ctx.lineTo(x + stepWidth / 2 + 5, arrowY + 10); // right bottom
+    ctx.closePath();
+    ctx.fill();
+});
+
+    // JOBS
+    timeline.forEach(({ t, job }) => {
+        const x = leftMargin + t * cellWidth;
+
+        let row = tasks.length; // idle by default
+        if (job !== "IDLE") {
+            const match = job.match(/T(\d+)/);
             row = match ? parseInt(match[1]) : 0;
         }
 
-        const x = leftMargin + t * cellWidth;
         const y = topMargin + row * (cellHeight + 10);
 
-        ctx.fillStyle = colorFromJobId(jobId);
-        ctx.fillRect(x, y, cellWidth, cellHeight);
+        ctx.fillStyle = colorFromJobId(job);
+        ctx.fillRect(x, y, stepWidth, cellHeight);
 
-        ctx.fillStyle = "#000";
-        ctx.fillText(jobId, x + 5, y + 17);
-    }
+        if (stepWidth >= 25) {
+            ctx.fillStyle = "#000";
+            ctx.fillText(job, x + 3, y + 17);
+        }
+    });
 
-    // Draw task labels on the left
-    ctx.font = "14px Arial";
-    for (let i = 0; i < tasks.length; i++) {
-        ctx.fillText(`T${i}`, 10, topMargin + i * (cellHeight + 10) + 17);
-    }
-    ctx.fillText("IDLE", 10, topMargin + tasks.length * (cellHeight + 10) + 17);
+    // Labels
+    ctx.font = "16px Arial";
+    ctx.fillStyle = "#000";
+
+    tasks.forEach((_, i) => {
+        ctx.fillText(`T${i}`, 20, topMargin + i * (cellHeight + 10) + 20);
+    });
+    ctx.fillText("IDLE", 20, topMargin + tasks.length * (cellHeight + 10) + 20);
 }
+
 
 
 function colorFromJobId(jobId) {
     if (jobId === "IDLE") return "#dddddd";
-
-    const match = jobId.match(/T(\d+)/);
-    const taskIndex = match ? parseInt(match[1]) : 0;
-
-    const colors = [
-        "#ff9999", "#99ff99", "#9999ff",
-        "#ffcc99", "#cc99ff", "#99ffcc"
-    ];
-
-    return colors[taskIndex % colors.length];
+    const idx = parseInt(jobId.match(/T(\d+)/)[1]);
+    const colors = ["#ff9999", "#99ff99", "#9999ff", "#ffcc99", "#cc99ff", "#99ffcc"];
+    return colors[idx % colors.length];
 }
+
+function showTaskInfo(tasks, hyperperiod) {
+    const div = document.getElementById("taskInfo");
+
+    let html = `<b>Hyperperiod:</b> ${hyperperiod}<br><br>`;
+    html += `<b>Task Set:</b><br><ul>`;
+
+    tasks.forEach((t, i) => {
+        if (t.type === "periodic") {
+            html += `<li><b>T${i}</b> → release r=${t.r}, exec e=${t.e}, period p=${t.p}, deadline d=${t.d}</li>`;
+        } else {
+            html += `<li><b>Aperiodic</b> A${i} → release r=${t.r}, exec e=${t.e}</li>`;
+        }
+    });
+
+    html += `</ul>`;
+
+    div.innerHTML = html;
+}
+
+
+
+// MAIN SIMULATION LOOP
+document.getElementById("runBtn").addEventListener("click", () => {
+    const scheduler = document.getElementById("schedulerSelect").value;
+
+    const fileInput = document.getElementById("fileInput").files[0];
+    if (!fileInput) return alert("Select a task file!");
+
+    const reader = new FileReader();
+    reader.onload = e => {
+        const tasks = parseTaskFile(e.target.result);
+
+        const SIMULATION_END = computeHyperperiod(tasks);
+        showTaskInfo(tasks, SIMULATION_END);
+
+        console.log("Hyperperiod =", SIMULATION_END);
+
+        let readyQueue = [];
+        let jobCounter = tasks.map(() => 1);
+        let timeline = [];
+
+        let arrivals = [];
+
+        for (currentTime = 0; currentTime <= SIMULATION_END;
+            currentTime = parseFloat((currentTime + TIME_STEP).toFixed(3))) {
+
+            releaseJobs(tasks, currentTime, jobCounter, readyQueue, arrivals);
+
+            const jobToRun = pickJob(scheduler, readyQueue, currentTime);
+
+            runJobForOneTick(jobToRun, currentTime, readyQueue);
+
+            timeline.push({ t: currentTime, job: jobToRun ? jobToRun.jobId : "IDLE" });
+        }
+
+        drawGanttChart(timeline, tasks, arrivals);
+    };
+
+    reader.readAsText(fileInput);
+});

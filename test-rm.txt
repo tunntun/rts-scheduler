@@ -1,0 +1,5 @@
+# I wanted to try the examples that we cover in the class.
+# We solve this example T1(1,4) T2(2,5) T3(5,20) for Rate Monotonic
+P 1 4
+P 2 5
+P 5 20

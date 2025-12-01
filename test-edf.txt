@@ -1,0 +1,5 @@
+# I wanted to try the examples that we cover in the class.
+# We solve this example T1(0.9,2) T2(2.3,5) for EDF
+
+P 0.9 2
+P 2.3 5

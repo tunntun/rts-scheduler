@@ -15,4 +15,5 @@ body {
 #ganttCanvas {
     border: 1px solid #444;
     margin-top: 20px;
+    width: 100%;
 }

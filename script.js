@@ -342,7 +342,7 @@ document.getElementById("runBtn").addEventListener("click", () => {
         let server = {
             period: serverPeriod,
             budget: serverBudget,
-            remaining: 0,
+            remaining: serverMode === "poller" ? 0 : serverBudget,
             nextRelease: serverPeriod
         };
 
